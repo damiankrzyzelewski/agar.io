@@ -1,4 +1,8 @@
+import random
+
 import pygame
+from pygame.time import delay
+
 from network import Network
 
 
@@ -7,7 +11,7 @@ class Canvas:
     def __init__(self, w, h, name="None"):
         self.width = w
         self.height = h
-        self.screen = pygame.display.set_mode((w,h))
+        self.screen = pygame.display.set_mode((w, h))
         pygame.display.set_caption(name)
 
     @staticmethod
@@ -17,14 +21,14 @@ class Canvas:
     def draw_text(self, text, size, x, y):
         pygame.font.init()
         font = pygame.font.SysFont("comicsans", size)
-        render = font.render(text, 1, (0,0,0))
-        self.screen.draw(render, (x,y))
+        render = font.render(text, 1, (0, 0, 0))
+        self.screen.blit(render, (x, y))
 
     def get_canvas(self):
         return self.screen
 
     def draw_background(self):
-        self.screen.fill((255,255,255))
+        self.screen.fill((255, 255, 255))
 
 
 class Player:
@@ -33,7 +37,7 @@ class Player:
     def __init__(self, startx, starty, max_x, min_x, max_y, min_y, color=(255, 0, 0)):
         self.x = startx
         self.y = starty
-        self.velocity = int(50 / 10**(5/6))
+        self.velocity = int(50 / 10 ** (5 / 6))
         self.color = color
         self.max_x = max_x
         self.min_x = min_x
@@ -44,13 +48,13 @@ class Player:
         pygame.draw.circle(g, self.color, (self.x + self.radius, self.y + self.radius), self.radius)
 
     def move(self, dirn):
-        if dirn == 0 and self.x + self.velocity + 2*self.radius <= self.max_x:
+        if dirn == 0 and self.x + self.velocity + 2 * self.radius <= self.max_x:
             self.x += self.velocity
         elif dirn == 1 and self.x + self.radius - self.velocity >= self.min_x:
             self.x -= self.velocity
         elif dirn == 2 and self.y + self.radius - self.velocity >= self.min_y:
             self.y -= self.velocity
-        elif dirn == 3 and self.y + self.velocity + 2*self.radius <= self.max_y:
+        elif dirn == 3 and self.y + self.velocity + 2 * self.radius <= self.max_y:
             self.y += self.velocity
 
 
@@ -65,6 +69,59 @@ class Game:
         self.player2 = Player(50, 50, self.width, 0, self.height, 0)
         self.player3 = Player(50, 50, self.width, 0, self.height, 0)
         self.canvas = Canvas(self.width, self.height, "Testing...")
+        self.resumeflag = 1
+
+    def check_collision(self):
+        # Funkcja pomocnicza do obliczania środka kuli
+        def get_player_center(player):
+            return player.x + player.radius, player.y + player.radius
+
+        # Sprawdź, czy aktualny gracz zjadł innego gracza
+        for player_info in [self.player2, self.player3]:
+            player_center = get_player_center(self.player)
+            player_info_center = get_player_center(player_info)
+
+            distance = ((player_center[0] - player_info_center[0]) ** 2 + (
+                        player_center[1] - player_info_center[1]) ** 2) ** 0.5
+
+            if distance < self.player.radius + player_info.radius and self.player.radius > player_info.radius:
+                # Aktualny gracz zjadł innego gracza
+                self.player.radius += player_info.radius // 2
+
+        # Sprawdź, czy aktualny gracz został zjedzony przez innego gracza
+        for player_info in [self.player2, self.player3]:
+            player_center = get_player_center(self.player)
+            player_info_center = get_player_center(player_info)
+
+            distance = ((player_center[0] - player_info_center[0]) ** 2 + (
+                        player_center[1] - player_info_center[1]) ** 2) ** 0.5
+
+            if distance < self.player.radius + player_info.radius and player_info.radius > self.player.radius:
+                # Aktualny gracz został zjedzony przez innego gracza
+                self.send_data()
+                self.player.x, self.player.y = 0, 0  # Przesuń aktualnego gracza na początkową pozycję
+                self.player.velocity = int(50 / self.player.radius ** (5 / 6))  # Zaktualizuj prędkość gracza
+                self.canvas.draw_text("You have been eaten!", 60, 100, 200)
+                self.canvas.draw_text("press space to respawn...", 40, 120, 250)
+                self.canvas.update()
+                delay(20)
+                self.resumeflag = 0
+
+            if self.resumeflag == 0:
+                self.player.x = 2000
+                self.player.y = 2000
+                self.send_data()
+                waiting_for_space = True
+                while waiting_for_space:
+                    for event in pygame.event.get():
+                        if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
+                            waiting_for_space = False
+                            self.resumeflag = 1
+                self.player.x = 0
+                self.player.y = random.randint(1, self.height)
+                self.player.radius = 10
+                self.send_data()
+                self.canvas.draw_background()  # Wyczyść ekran po opóźnieniu
 
     def run(self):
         clock = pygame.time.Clock()
@@ -81,7 +138,6 @@ class Game:
                         run = False
 
             keys = pygame.key.get_pressed()
-
             if keys[pygame.K_RIGHT]:
                 if self.player.x <= self.width - self.player.velocity:
                     self.player.move(0)
@@ -99,10 +155,11 @@ class Game:
                 initial_positions_received, small_balls_info = self.receive_initial_positions()
                 self.initialize_small_balls(small_balls_info)
 
+            self.check_collision()
             # Send Network Stuff
             self.player.radius, self.player2.x, self.player2.y, self.player2.radius, self.player3.x, self.player3.y, self.player3.radius, self.small_balls = self.parse_data(
                 self.send_data(), self.net.id)
-            self.player.velocity = int(50 / self.player.radius**(5/6))
+            self.player.velocity = int(50 / self.player.radius ** (5 / 6))
             # Update Canvas
             self.canvas.draw_background()
             self.draw_small_balls()
@@ -141,7 +198,7 @@ class Game:
         for ball_data in balls_data:
             x, y = map(int, ball_data.split(","))
             self.small_balls.append({'x': x, 'y': y})
-            
+
     def send_data(self):
         data = f"{self.net.id}:{self.player.x},{self.player.y},{self.player.radius}"
         reply = self.net.send(data)
@@ -194,4 +251,8 @@ class Game:
 if __name__ == "__main__":
     game = Game(800, 600)
     game.run()
+
+
+
+
 
