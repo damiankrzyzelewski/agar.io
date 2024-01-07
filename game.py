@@ -44,8 +44,12 @@ class Player:
         self.max_y = max_y
         self.min_y = min_y
 
-    def draw(self, g):
+    def draw(self, g, text):
         pygame.draw.circle(g, self.color, (self.x + self.radius, self.y + self.radius), self.radius)
+        text_size = 20
+        text_font = pygame.font.SysFont("comicsans", text_size)
+        text_render = text_font.render(text, 1, (0, 0, 0))
+        g.blit(text_render, (self.x + self.radius - text_render.get_width() // 2, self.y + self.radius - text_render.get_height() // 2))
 
     def move(self, dirn):
         if dirn == 0 and self.x + self.velocity + 2 * self.radius <= self.max_x:
@@ -70,6 +74,7 @@ class Game:
         self.player3 = Player(50, 50, self.width, 0, self.height, 0)
         self.canvas = Canvas(self.width, self.height, "Testing...")
         self.resumeflag = 1
+        pygame.font.init()
 
     def check_collision(self):
         # Funkcja pomocnicza do obliczania środka kuli
@@ -87,6 +92,7 @@ class Game:
             if distance < self.player.radius + player_info.radius and self.player.radius > player_info.radius:
                 # Aktualny gracz zjadł innego gracza
                 self.player.radius += player_info.radius // 2
+                delay(5)
 
         # Sprawdź, czy aktualny gracz został zjedzony przez innego gracza
         for player_info in [self.player2, self.player3]:
@@ -104,7 +110,7 @@ class Game:
                 self.canvas.draw_text("You have been eaten!", 60, 100, 200)
                 self.canvas.draw_text("press space to respawn...", 40, 120, 250)
                 self.canvas.update()
-                delay(20)
+                delay(5)
                 self.resumeflag = 0
 
             if self.resumeflag == 0:
@@ -163,9 +169,9 @@ class Game:
             # Update Canvas
             self.canvas.draw_background()
             self.draw_small_balls()
-            self.player.draw(self.canvas.get_canvas())
-            self.player2.draw(self.canvas.get_canvas())
-            self.player3.draw(self.canvas.get_canvas())
+            self.player.draw(self.canvas.get_canvas(), "you")
+            self.player2.draw(self.canvas.get_canvas(), "p2")
+            self.player3.draw(self.canvas.get_canvas(), "p3")
             self.canvas.update()
 
         pygame.quit()
@@ -174,7 +180,14 @@ class Game:
         initial_positions = self.net.receive()
         print(initial_positions)
         if initial_positions and "?" in initial_positions:
-            player_positions, small_balls_info = initial_positions.split("?")
+            player_positions, small_balls_and_color_info = initial_positions.split("?")
+            small_balls_info, col_info = small_balls_and_color_info.split("@")
+            colours = col_info.split("|")
+            colours = [x.split(",") for x in colours]
+            self.player.color = tuple(map(int, colours[int(self.net.id)]))
+            colours.pop(int(self.net.id))
+            self.player2.color = tuple(map(int, colours[0]))
+            self.player3.color = tuple(map(int, colours[1]))
             player_positions = player_positions.split("|")
             if len(player_positions) == 3:
                 for player_info in player_positions:
@@ -251,8 +264,3 @@ class Game:
 if __name__ == "__main__":
     game = Game(800, 600)
     game.run()
-
-
-
-
-

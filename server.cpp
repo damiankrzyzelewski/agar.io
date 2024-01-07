@@ -71,7 +71,7 @@ void threaded_client(int client_socket) {
     std::string initialPlayerPositions = playerInfo[0] + "|" + playerInfo[1] + "|" + playerInfo[2];
 
     // Send player and smallBalls positions
-    std::string initialMessage = initialPlayerPositions + "?" + generateSmallBallsInfo();
+    std::string initialMessage = initialPlayerPositions + "?" + generateSmallBallsInfo() + "@8,163,18|250,176,2|2,246,250";
     send(client_socket, initialMessage.c_str(), initialMessage.size(), 0);
 
     std::string reply;
