@@ -17,19 +17,24 @@ struct Ball {
     int y;
 };
 int clients;
+std::mutex clientsMutex;
 class Game {
 public:
     std::mutex mutex; 
     std::vector<std::string> playerInfo;
     std::vector<Ball> smallBalls;
+    int disconnectedPlayersCounter;
+    std::thread generatorThread;
 
     Game() : playerInfo{"0:20,20,10", "1:400,20,10", "2:20,400,10"} {
         initializeSmallBalls(20, 800, 600);
-
-        std::thread generatorThread(&Game::generateSmallBallsThread, this);
+        disconnectedPlayersCounter = 0;
+        generatorThread = std::thread(&Game::generateSmallBallsThread, this);
         generatorThread.detach();
     }
-    
+    ~Game() {
+        std::cout << "Koniec gry" << std::endl;
+    }
 
     std::string generateSmallBallsInfo() {
         std::lock_guard<std::mutex> lock(mutex); 
@@ -85,6 +90,9 @@ public:
 
     void generateSmallBallsThread() {
         while (true) {
+            if (disconnectedPlayersCounter >= 3) {
+                break;
+            }
             generateSmallBalls();
             std::this_thread::sleep_for(std::chrono::seconds(8));
         }
@@ -153,6 +161,7 @@ void threaded_client(int client_socket, std::string currentId, std::shared_ptr<G
         std::to_string(disconnectedPlayerY) + "," +
         std::to_string(disconnectedPlayerRadius);
     std::cout << "Player has left the game" << std::endl;
+    game->disconnectedPlayersCounter++;
     close(client_socket);
 }
 
@@ -174,14 +183,17 @@ int main() {
     while (true) {
         socklen_t clientSize = sizeof(clientAddress);
         int clientSocket = accept(serverSocket, (struct sockaddr*)&clientAddress, &clientSize);
-        if (clients % 3 == 0){
-            game = std::make_shared<Game>();
-            std::cout << "A new game has been created." << std::endl;
+        {
+            std::lock_guard<std::mutex> lock(clientsMutex);
+            if (clients % 3 == 0){
+                game = std::make_shared<Game>();
+                std::cout << "A new game has been created." << std::endl;
+            }
+            std::cout << "A new client has connected to the server on addr: " << inet_ntoa(clientAddress.sin_addr) << std::endl;
+            std::thread clientThread(threaded_client, clientSocket, std::to_string(clients % 3), game);
+            clientThread.detach();
+            clients += 1;
         }
-        std::cout << "A new client has connected to the server on addr: " << inet_ntoa(clientAddress.sin_addr) << std::endl;
-        std::thread clientThread(threaded_client, clientSocket, std::to_string(clients % 3), game);
-        clientThread.detach();
-        clients += 1;
     }
 
     close(serverSocket);
