@@ -76,6 +76,8 @@ class Game:
         self.resumeflag = 1
         self.start_time = None  # Zmienna do przechowywania czasu rozpoczęcia gry
         self.game_duration = 180000  # Czas gry w milisekundach (3 minuty)
+        self.eat_cooldown = False
+        self.eat_cooldown_duration = 1000  # 1000 milliseconds (1 second)
         pygame.font.init()
 
     def check_collision(self):
@@ -92,10 +94,14 @@ class Game:
                         player_center[1] - player_info_center[1]) ** 2) ** 0.5
 
             if distance < self.player.radius + player_info.radius and self.player.radius > player_info.radius:
-                # Aktualny gracz zjadł innego gracza
-                self.player.radius += player_info.radius // 2
-                self.send_data()
-                delay(20)
+                if not self.eat_cooldown:
+                    # Aktualny gracz zjadł innego gracza
+                    self.player.radius += player_info.radius // 2
+                    self.send_data()
+                    delay(20)
+                    # Activate eat cooldown
+                    self.eat_cooldown = True
+                    pygame.time.set_timer(pygame.USEREVENT, self.eat_cooldown_duration)  # Set a timer for cooldown
 
         # Sprawdź, czy aktualny gracz został zjedzony przez innego gracza
         for player_info in [self.player2, self.player3]:
@@ -146,6 +152,9 @@ class Game:
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         run = False
+                elif event.type == pygame.USEREVENT:
+                    # Deactivate eat cooldown when the timer expires
+                    self.eat_cooldown = False
 
             keys = pygame.key.get_pressed()
             if keys[pygame.K_RIGHT]:
@@ -160,6 +169,7 @@ class Game:
             if keys[pygame.K_DOWN]:
                 if self.player.y <= self.height - self.player.velocity:
                     self.player.move(3)
+
 
             while not initial_positions_received:
                 self.canvas.draw_background()
