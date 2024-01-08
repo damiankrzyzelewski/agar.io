@@ -1,7 +1,7 @@
 import random
 
 import pygame
-from pygame.time import delay
+from pygame.time import delay, get_ticks
 
 from network import Network
 
@@ -72,8 +72,10 @@ class Game:
         self.player = Player(50, 50, self.width, 0, self.height, 0)
         self.player2 = Player(50, 50, self.width, 0, self.height, 0)
         self.player3 = Player(50, 50, self.width, 0, self.height, 0)
-        self.canvas = Canvas(self.width, self.height, "Testing...")
+        self.canvas = Canvas(self.width, self.height, "Agar.io")
         self.resumeflag = 1
+        self.start_time = None  # Zmienna do przechowywania czasu rozpoczęcia gry
+        self.game_duration = 180000  # Czas gry w milisekundach (3 minuty)
         pygame.font.init()
 
     def check_collision(self):
@@ -92,7 +94,8 @@ class Game:
             if distance < self.player.radius + player_info.radius and self.player.radius > player_info.radius:
                 # Aktualny gracz zjadł innego gracza
                 self.player.radius += player_info.radius // 2
-                delay(5)
+                self.send_data()
+                delay(20)
 
         # Sprawdź, czy aktualny gracz został zjedzony przez innego gracza
         for player_info in [self.player2, self.player3]:
@@ -106,11 +109,11 @@ class Game:
                 # Aktualny gracz został zjedzony przez innego gracza
                 self.send_data()
                 self.player.x, self.player.y = 0, 0  # Przesuń aktualnego gracza na początkową pozycję
-                self.player.velocity = int(50 / self.player.radius ** (5 / 6))  # Zaktualizuj prędkość gracza
-                self.canvas.draw_text("You have been eaten!", 60, 100, 200)
-                self.canvas.draw_text("press space to respawn...", 40, 120, 250)
+                self.player.velocity = max(int(50 / self.player.radius ** (5 / 6)), 0.3)  # Zaktualizuj prędkość gracza
+                self.canvas.draw_text("You have been eaten!", 60, self.width//8, self.height//3)
+                self.canvas.draw_text("press space to respawn...", 40, self.width//8 + 20, self.height//3 + 50)
                 self.canvas.update()
-                delay(5)
+                delay(10)
                 self.resumeflag = 0
 
             if self.resumeflag == 0:
@@ -133,6 +136,7 @@ class Game:
         clock = pygame.time.Clock()
         run = True
         initial_positions_received = False
+        remaining_seconds = 180
         while run:
             clock.tick(60)
 
@@ -157,28 +161,68 @@ class Game:
                 if self.player.y <= self.height - self.player.velocity:
                     self.player.move(3)
 
-            if not initial_positions_received:
+            while not initial_positions_received:
+                self.canvas.draw_background()
+                self.canvas.draw_text("Waiting for other players...", 30, self.width//8, self.height//3)
+                self.canvas.update()
                 initial_positions_received, small_balls_info = self.receive_initial_positions()
                 self.initialize_small_balls(small_balls_info)
-
+            # Inicjalizacja czasu gry przy pierwszym obiegu pętli
+            if self.start_time is None:
+                self.start_time = get_ticks()
+            # Oblicz pozostały czas
+            elapsed_time = get_ticks() - self.start_time
+            remaining_time = max(0, self.game_duration - elapsed_time)
+            # Konwersja czasu z milisekund na sekundy
+            remaining_seconds = remaining_time // 1000
             self.check_collision()
             # Send Network Stuff
-            self.player.radius, self.player2.x, self.player2.y, self.player2.radius, self.player3.x, self.player3.y, self.player3.radius, self.small_balls = self.parse_data(
-                self.send_data(), self.net.id)
-            self.player.velocity = int(50 / self.player.radius ** (5 / 6))
+            try:
+                self.player.radius, self.player2.x, self.player2.y, self.player2.radius, self.player3.x, self.player3.y, self.player3.radius, self.small_balls = self.parse_data(
+                    self.send_data(), self.net.id)
+                self.player.velocity = max(int(50 / self.player.radius ** (5 / 6)), 0.3)
+            except Exception as e:
+                print("Error in communication with server ", e)
             # Update Canvas
             self.canvas.draw_background()
             self.draw_small_balls()
             self.player.draw(self.canvas.get_canvas(), "you")
             self.player2.draw(self.canvas.get_canvas(), "p2")
             self.player3.draw(self.canvas.get_canvas(), "p3")
+            # Wyświetl pozostały czas w prawym górnym rogu
+            self.canvas.draw_text(f"Time left: {remaining_seconds}s", 20, self.width - 150, 10)
             self.canvas.update()
-
+            # Sprawdź, czy czas gry minął
+            if elapsed_time >= self.game_duration:
+                print("Game Over - Time's up!")
+                run = False
+        self.canvas.draw_background()
+        self.canvas.draw_text(f"Leaderboard:", 40, self.width // 8, self.height // 60)
+        players = [
+            [self.player, "you: ", self.player.radius],
+            [self.player2, "player2: ", self.player2.radius],
+            [self.player3, "player3: ", self.player3.radius]
+        ]
+        sorted_players = sorted(players, key=lambda x: x[2], reverse=True)
+        # Wyświetlenie posortowanych wyników
+        text_y_position = self.height//6
+        for rank, player_info in enumerate(sorted_players, start=1):
+            player, label, radius = player_info
+            display_text = f"{rank}. {label} Radius: {radius}"
+            self.canvas.draw_text(display_text, 30, self.width // 8, text_y_position)
+            text_y_position += self.height // 20
+        self.canvas.draw_text("press space to quit the game...", 20, self.width // 8, text_y_position+20)
+        self.canvas.update()
+        if remaining_seconds < 1:
+            waiting_for_space = True
+            while waiting_for_space:
+                for event in pygame.event.get():
+                    if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
+                        waiting_for_space = False
         pygame.quit()
 
     def receive_initial_positions(self):
         initial_positions = self.net.receive()
-        print(initial_positions)
         if initial_positions and "?" in initial_positions:
             player_positions, small_balls_and_color_info = initial_positions.split("?")
             small_balls_info, col_info = small_balls_and_color_info.split("@")
@@ -213,7 +257,7 @@ class Game:
             self.small_balls.append({'x': x, 'y': y})
 
     def send_data(self):
-        data = f"{self.net.id}:{self.player.x},{self.player.y},{self.player.radius}"
+        data = f"{self.net.id}:{int(self.player.x)},{int(self.player.y)},{self.player.radius}"
         reply = self.net.send(data)
         return reply
 
@@ -257,7 +301,7 @@ class Game:
                 balls_list
             )
         except Exception as e:
-            print(f"Error parsing data: {e}")
+            print(f"Error parsing data: {e}", )
             return 0, 0, 0, 0, 0, 0, 0, []
 
 

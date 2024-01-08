@@ -9,69 +9,95 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <mutex>
+#include <memory>
+#include <chrono>
 
-// Struktura reprezentująca informacje o małej kulce
 struct Ball {
     int x;
     int y;
 };
+int clients;
+class Game {
+public:
+    std::mutex mutex; 
+    std::vector<std::string> playerInfo;
+    std::vector<Ball> smallBalls;
 
-std::mutex smallBallsMutex;
-std::vector<std::string> playerInfo = {"0:20,20,10", "1:400,20,10", "2:20,400,10"};
-std::vector<Ball> smallBalls;  // Informacje o małych kulach
+    Game() : playerInfo{"0:20,20,10", "1:400,20,10", "2:20,400,10"} {
+        initializeSmallBalls(20, 800, 600);
 
-std::string currentId = "0";
+        std::thread generatorThread(&Game::generateSmallBallsThread, this);
+        generatorThread.detach();
+    }
+    
 
-// Funkcja do generowania informacji o małych kulach
-std::string generateSmallBallsInfo() {
-    smallBallsMutex.lock();
-    std::string smallBallsInfo;
-    for (size_t i = 0; i < smallBalls.size(); ++i) {
-        smallBallsInfo += std::to_string(smallBalls[i].x) + "," + std::to_string(smallBalls[i].y);
-        if (i < smallBalls.size() - 1) {
-            smallBallsInfo += "|";
+    std::string generateSmallBallsInfo() {
+        std::lock_guard<std::mutex> lock(mutex); 
+        std::string smallBallsInfo;
+        if (smallBalls.empty()) {
+            Ball ball;
+            ball.x = rand() % 800;
+            ball.y = rand() % 600;
+            smallBalls.push_back(ball);
+        }
+            
+        for (size_t i = 0; i < smallBalls.size(); ++i) {
+            smallBallsInfo += std::to_string(smallBalls[i].x) + "," + std::to_string(smallBalls[i].y);
+            if (i < smallBalls.size() - 1) {
+                smallBallsInfo += "|";
+            }
+        }
+        return smallBallsInfo;
+    }
+
+    void initializeSmallBalls(int numBalls, int boardWidth, int boardHeight) {
+        std::lock_guard<std::mutex> lock(mutex); 
+        for (int i = 0; i < numBalls; ++i) {
+            Ball ball;
+            ball.x = rand() % boardWidth;
+            ball.y = rand() % boardHeight;
+            smallBalls.push_back(ball);
         }
     }
-    smallBallsMutex.unlock();
-    return smallBallsInfo;
-}
 
-// Funkcja do inicjalizacji informacji o małych kulach
-void initializeSmallBalls(int numBalls, int boardWidth, int boardHeight) {
-    for (int i = 0; i < numBalls; ++i) {
+    void handleCollision(int playerId, int playerX, int playerY, int playerRadius) {
+        std::lock_guard<std::mutex> lock(mutex);  
+        for (size_t i = 0; i < smallBalls.size(); ++i) {
+            int distance = std::sqrt(std::pow(playerX + playerRadius - smallBalls[i].x, 2) +
+                                     std::pow(playerY + playerRadius - smallBalls[i].y, 2));
+            if (distance < playerRadius) {
+                playerRadius += 2;
+                smallBalls.erase(smallBalls.begin() + i);
+                playerInfo[playerId] = std::to_string(playerId) + ":" + std::to_string(playerX) + "," +
+                                       std::to_string(playerY) + "," + std::to_string(playerRadius);
+                break;
+            }
+        }
+    }
+
+    void generateSmallBalls() {
+        std::lock_guard<std::mutex> lock(mutex);
         Ball ball;
-        ball.x = rand() % boardWidth;
-        ball.y = rand() % boardHeight;
+        ball.x = rand() % 800;
+        ball.y = rand() % 600;
         smallBalls.push_back(ball);
     }
-}
 
-void generateNewBalls() {
-    while (true) {
-        std::this_thread::sleep_for(std::chrono::seconds(3));
-
-        // Dodaj nowe małe piłki
-        Ball newBall;
-        newBall.x = rand() % 800;  // Zakładam szerokość planszy 800 (dostosuj do rzeczywistej szerokości)
-        newBall.y = rand() % 600;  // Zakładam wysokość planszy 600 (dostosuj do rzeczywistej wysokości)
-        smallBallsMutex.lock();
-        smallBalls.push_back(newBall);
-        smallBallsMutex.unlock();
-        std::cout << "Added a new small ball at (" << newBall.x << "," << newBall.y << ")" << std::endl;
+    void generateSmallBallsThread() {
+        while (true) {
+            generateSmallBalls();
+            std::this_thread::sleep_for(std::chrono::seconds(8));
+        }
     }
-}
+};
 
-void threaded_client(int client_socket) {
+
+void threaded_client(int client_socket, std::string currentId, std::shared_ptr<Game> game) {
     char buffer[2048];
     send(client_socket, currentId.c_str(), currentId.size(), 0);
-
-    currentId = std::to_string(std::stoi(currentId) + 1);
-
-    // Send initial positions after sending client ID
-    std::string initialPlayerPositions = playerInfo[0] + "|" + playerInfo[1] + "|" + playerInfo[2];
-
-    // Send player and smallBalls positions
-    std::string initialMessage = initialPlayerPositions + "?" + generateSmallBallsInfo() + "@8,163,18|250,176,2|2,246,250";
+    while (clients % 3 != 0) {}
+    std::string initialPlayerPositions = game->playerInfo[0] + "|" + game->playerInfo[1] + "|" + game->playerInfo[2];
+    std::string initialMessage = initialPlayerPositions + "?" + game->generateSmallBallsInfo() + "@8,163,18|250,176,2|2,246,250";
     send(client_socket, initialMessage.c_str(), initialMessage.size(), 0);
 
     std::string reply;
@@ -83,28 +109,23 @@ void threaded_client(int client_socket) {
         if (bytes_received <= 0) {
             send(client_socket, "Goodbye", sizeof("Goodbye"), 0);
             break;
-    } else {
-        //std::cout << "Received: " << buffer << std::endl;
+        } else {
+            std::string data = buffer;
+            size_t posSeparator = data.find("?");
 
-        std::string data = buffer;
-        size_t posSeparator = data.find("?");
+            std::string playerData;
 
-        std::string playerData;  // Przeniesienie deklaracji tutaj
+            for (int i = 0; i < 3; ++i) {
+                playerData = data.substr(0, posSeparator);
+                data = data.substr(posSeparator + 1);
 
-        for (int i = 0; i < 3; ++i) {
-            playerData = data.substr(0, posSeparator);
-            data = data.substr(posSeparator + 1);
+                size_t idSeparator = playerData.find(":");
+                int playerId = std::stoi(playerData.substr(0, idSeparator));
+                std::string playerPositionAndRadius = playerData.substr(idSeparator + 1);
 
-            // Extract player ID, position, and radius
-            size_t idSeparator = playerData.find(":");
-            int playerId = std::stoi(playerData.substr(0, idSeparator));
-            std::string playerPositionAndRadius = playerData.substr(idSeparator + 1);
+                game->playerInfo[playerId] = std::to_string(playerId) + ":" + playerPositionAndRadius;
+            }
 
-            // Update the position and radius for the corresponding player ID
-            playerInfo[playerId] = std::to_string(playerId) + ":" + playerPositionAndRadius;
-        }
-
-           // Extract player position and radius after the loop
             size_t idSeparator = playerData.find(":");
             int playerId = std::stoi(playerData.substr(0, idSeparator));
             std::string playerPositionAndRadius = playerData.substr(idSeparator + 1);
@@ -113,42 +134,29 @@ void threaded_client(int client_socket) {
             int playerY = std::stoi(playerPositionAndRadius.substr(commaSeparator + 1));
             size_t lastComma = playerPositionAndRadius.rfind(",");
             int playerRadius = std::stoi(playerPositionAndRadius.substr(lastComma + 1));
-            smallBallsMutex.lock();
-            for (size_t i = 0; i < smallBalls.size(); ++i) {
-                // Sprawdzamy kolizję z małą piłką
-                int distance = std::sqrt(std::pow(playerX+playerRadius - smallBalls[i].x, 2) + std::pow(playerY+playerRadius - smallBalls[i].y, 2));
-                if (distance < playerRadius) {
-                    // Gracz "zjada" małą piłkę
-                    playerRadius += 2;
-                    // Usuwamy małą piłkę z listy
-                    smallBalls.erase(smallBalls.begin() + i);
-                    std::cout << playerId << ": " << playerRadius << std::endl;
 
-                    // Zaktualizuj playerInfo[playerId] po zwiększeniu promienia
-                    playerInfo[playerId] = std::to_string(playerId) + ":" + std::to_string(playerX) + "," + std::to_string(playerY) + "," + std::to_string(playerRadius);
-                    std::cout << playerInfo[playerId] << std::endl;
-                    break;  // Przerwij pętlę, gdy już doszło do kolizji
-                }
-            }
-            smallBallsMutex.unlock();
-            // Construct the reply with the positions and radius of all players
-            reply = playerInfo[0] + "|" + playerInfo[1] + "|" + playerInfo[2];
+            game->handleCollision(playerId, playerX, playerY, playerRadius);
 
-            // Append small balls positions to the reply
-            reply += "?" + generateSmallBallsInfo();
-            std::cout << "Sending: " << reply << std::endl;
+            reply = game->playerInfo[0] + "|" + game->playerInfo[1] + "|" + game->playerInfo[2];
+            reply += "?" + game->generateSmallBallsInfo();
         }
 
         send(client_socket, reply.c_str(), reply.size(), 0);
     }
-    std::cout << "Connection Closed" << std::endl;
+    int disconnectedPlayerX = rand() % 800 - 900;
+    int disconnectedPlayerY = rand() % 600 - 700;
+    int disconnectedPlayerRadius = 9;
+    // Ustaw informacje o rozłączonym graczu
+    game->playerInfo[std::stoi(currentId)] =
+        currentId + ":" +
+        std::to_string(disconnectedPlayerX) + "," +
+        std::to_string(disconnectedPlayerY) + "," +
+        std::to_string(disconnectedPlayerRadius);
+    std::cout << "Player has left the game" << std::endl;
     close(client_socket);
 }
 
 int main() {
-    // Initialize smallBalls
-    initializeSmallBalls(20, 800, 600);
-    std::thread newBallsThread(generateNewBalls);
     int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
 
     sockaddr_in serverAddress, clientAddress;
@@ -157,17 +165,23 @@ int main() {
     serverAddress.sin_addr.s_addr = INADDR_ANY;
 
     bind(serverSocket, (struct sockaddr*)&serverAddress, sizeof(serverAddress));
-    listen(serverSocket, 2);
+    listen(serverSocket, 3);
     std::cout << "Waiting for a connection" << std::endl;
+
+    clients = 0;
+    std::shared_ptr<Game> game = std::make_shared<Game>();
 
     while (true) {
         socklen_t clientSize = sizeof(clientAddress);
         int clientSocket = accept(serverSocket, (struct sockaddr*)&clientAddress, &clientSize);
-
-        std::cout << "Connected to: " << inet_ntoa(clientAddress.sin_addr) << std::endl;
-
-        std::thread clientThread(threaded_client, clientSocket);
-        clientThread.detach();  // Allow the thread to run independently
+        if (clients % 3 == 0){
+            game = std::make_shared<Game>();
+            std::cout << "A new game has been created." << std::endl;
+        }
+        std::cout << "A new client has connected to the server on addr: " << inet_ntoa(clientAddress.sin_addr) << std::endl;
+        std::thread clientThread(threaded_client, clientSocket, std::to_string(clients % 3), game);
+        clientThread.detach();
+        clients += 1;
     }
 
     close(serverSocket);
