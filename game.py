@@ -7,7 +7,10 @@ from network import Network
 
 
 class Canvas:
-
+    """
+    Prosta klasa do zarządzania oknem gry i rysowania na nim przy użyciu Pygame.
+    Umożliwia manipulację treścią okna, rysowanie tekstu i aktualizację wyświetlacza.
+    """
     def __init__(self, w, h, name="None"):
         self.width = w
         self.height = h
@@ -15,9 +18,11 @@ class Canvas:
         pygame.display.set_caption(name)
 
     @staticmethod
+    # metoda do odświeżania okna po rysowaniu na nim
     def update():
         pygame.display.update()
 
+    # pozwala na rysowanie tekstu na oknie gry
     def draw_text(self, text, size, x, y):
         pygame.font.init()
         font = pygame.font.SysFont("comicsans", size)
@@ -32,6 +37,11 @@ class Canvas:
 
 
 class Player:
+    """
+    Klasa reprezentująca gracza w grze Agar.io.
+    Odpowiada za przechowywanie pozycji, prędkości, koloru i innych informacji o graczu.
+    Zawiera metody do rysowania gracza i aktualizacji jego pozycji w zależności od kierunku ruchu.
+    """
     radius = 25  # Set the radius for the circles
 
     def __init__(self, startx, starty, max_x, min_x, max_y, min_y, color=(255, 0, 0)):
@@ -63,7 +73,11 @@ class Player:
 
 
 class Game:
-
+    """
+    Klasa reprezentująca główną logikę gry Agar.io.
+    Zarządza interakcjami między graczami, obsługuje wykryte kolizje, rysuje elementy na ekranie,
+    kontroluje czas trwania gry i zarządza połączeniem z serwerem.
+    """
     def __init__(self, w, h):
         self.small_balls = None
         self.net = Network()
@@ -139,6 +153,7 @@ class Game:
                 self.canvas.draw_background()  # Wyczyść ekran po opóźnieniu
 
     def run(self):
+     # Główna metoda sterująca przebiegiem gry, obsługująca pętlę gry, rysowanie i aktualizacje.
         clock = pygame.time.Clock()
         run = True
         initial_positions_received = False
@@ -232,6 +247,7 @@ class Game:
         pygame.quit()
 
     def receive_initial_positions(self):
+    # Metoda odbierająca początkowe pozycje graczy i informacje o kolorach od serwera.
         initial_positions = self.net.receive()
         if initial_positions and "?" in initial_positions:
             player_positions, small_balls_and_color_info = initial_positions.split("?")
@@ -256,10 +272,12 @@ class Game:
         return False, ""
 
     def draw_small_balls(self):
+    # metoda rysująca małe piłki na ekranie które gracz może zjeść
         for ball in self.small_balls:
             pygame.draw.circle(self.canvas.get_canvas(), (0, 0, 255), (ball['x'], ball['y']), 5)
 
     def initialize_small_balls(self, small_balls_info):
+    # Metoda inicjalizująca pozycje małych kulek na podstawie przekazanych informacji.
         self.small_balls = []
         balls_data = small_balls_info.split("|")
         for ball_data in balls_data:
@@ -267,12 +285,14 @@ class Game:
             self.small_balls.append({'x': x, 'y': y})
 
     def send_data(self):
+    # Metoda wysyłająca dane o graczu do serwera i zwracająca odpowiedź.
         data = f"{self.net.id}:{int(self.player.x)},{int(self.player.y)},{self.player.radius}"
         reply = self.net.send(data)
         return reply
 
     @staticmethod
     def parse_data(data, current_player_id):
+    # Metoda parsująca otrzymane dane od serwera i zwracająca zaktualizowane informacje o grze.
         try:
             player_info_list = []
             current_player_radius = 0  # Zmienna do przechowywania radiusa aktualnego gracza

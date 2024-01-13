@@ -12,6 +12,9 @@
 #include <memory>
 #include <chrono>
 
+#define BOARD_WIDTH 800
+#define BOARD_HEIGHT 600
+
 struct Ball {
     int x;
     int y;
@@ -27,7 +30,7 @@ public:
     std::thread generatorThread;
 
     Game() : playerInfo{"0:20,20,10", "1:400,20,10", "2:20,400,10"} {
-        initializeSmallBalls(20, 800, 600);
+        initializeSmallBalls(20, BOARD_WIDTH, BOARD_HEIGHT);
         disconnectedPlayersCounter = 0;
         generatorThread = std::thread(&Game::generateSmallBallsThread, this);
         generatorThread.detach();
@@ -36,13 +39,17 @@ public:
         std::cout << "Koniec gry" << std::endl;
     }
 
+     /**
+     * Generuje informacje dotyczące małych piłek.
+     * @return Łańcuch znaków reprezentujący informacje o małych piłkach.
+     */
     std::string generateSmallBallsInfo() {
         std::lock_guard<std::mutex> lock(mutex); 
         std::string smallBallsInfo;
         if (smallBalls.empty()) {
             Ball ball;
-            ball.x = rand() % 800;
-            ball.y = rand() % 600;
+            ball.x = rand() % BOARD_WIDTH;
+            ball.y = rand() % BOARD_HEIGHT;
             smallBalls.push_back(ball);
         }
             
@@ -55,6 +62,12 @@ public:
         return smallBallsInfo;
     }
 
+    /**
+     * Inicjalizuje pozycje małych piłek na planszy.
+     * @param numBalls Liczba małych piłek do wygenerowania.
+     * @param boardWidth Szerokość planszy.
+     * @param boardHeight Wysokość planszy.
+     */
     void initializeSmallBalls(int numBalls, int boardWidth, int boardHeight) {
         std::lock_guard<std::mutex> lock(mutex); 
         for (int i = 0; i < numBalls; ++i) {
@@ -65,6 +78,13 @@ public:
         }
     }
 
+    /**
+     * Obsługuje kolizje pomiędzy graczem a małymi piłkami.
+     * @param playerId Identyfikator gracza.
+     * @param playerX Pozycja gracza w osi X.
+     * @param playerY Pozycja gracza w osi Y.
+     * @param playerRadius Promień gracza.
+     */
     void handleCollision(int playerId, int playerX, int playerY, int playerRadius) {
         std::lock_guard<std::mutex> lock(mutex);  
         for (size_t i = 0; i < smallBalls.size(); ++i) {
@@ -80,14 +100,20 @@ public:
         }
     }
 
+    /**
+     * Generuje nowe małe piłki na planszy.
+     */
     void generateSmallBalls() {
         std::lock_guard<std::mutex> lock(mutex);
         Ball ball;
-        ball.x = rand() % 800;
-        ball.y = rand() % 600;
+        ball.x = rand() % BOARD_WIDTH;
+        ball.y = rand() % BOARD_HEIGHT;
         smallBalls.push_back(ball);
     }
 
+    /**
+     * Wątek generujący małe piłki na planszy w regularnych odstępach czasowych.
+     */
     void generateSmallBallsThread() {
         while (true) {
             if (disconnectedPlayersCounter >= 3) {
@@ -99,7 +125,12 @@ public:
     }
 };
 
-
+/**
+ * Funkcja obsługująca wątek klienta.
+ * @param client_socket Gniazdo klienta.
+ * @param currentId Identyfikator klienta.
+ * @param game Obiekt gry.
+ */
 void threaded_client(int client_socket, std::string currentId, std::shared_ptr<Game> game) {
     char buffer[2048];
     send(client_socket, currentId.c_str(), currentId.size(), 0);
@@ -165,16 +196,34 @@ void threaded_client(int client_socket, std::string currentId, std::shared_ptr<G
     close(client_socket);
 }
 
+/**
+ * Funkcja główna programu.
+ * Tworzy gniazdo serwera, nasłuchuje na połączenia i obsługuje klientów.
+ */
 int main() {
     int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (serverSocket == -1) {
+        std::cerr << "Error creating socket" << std::endl;
+        return -1;
+    }
 
     sockaddr_in serverAddress, clientAddress;
     serverAddress.sin_family = AF_INET;
     serverAddress.sin_port = htons(5555);
     serverAddress.sin_addr.s_addr = INADDR_ANY;
 
-    bind(serverSocket, (struct sockaddr*)&serverAddress, sizeof(serverAddress));
-    listen(serverSocket, 3);
+    if (bind(serverSocket, (struct sockaddr*)&serverAddress, sizeof(serverAddress)) == -1) {
+        std::cerr << "Error binding socket" << std::endl;
+        close(serverSocket);
+        return -1;
+    }
+
+    if (listen(serverSocket, 3) == -1) {
+        std::cerr << "Error listening on socket" << std::endl;
+        close(serverSocket);
+        return -1;
+    }
+
     std::cout << "Waiting for a connection" << std::endl;
 
     clients = 0;
@@ -183,9 +232,15 @@ int main() {
     while (true) {
         socklen_t clientSize = sizeof(clientAddress);
         int clientSocket = accept(serverSocket, (struct sockaddr*)&clientAddress, &clientSize);
+        if (clientSocket == -1) {
+            std::cerr << "Error accepting connection" << std::endl;
+            close(serverSocket);
+            return -1;
+        }
+
         {
             std::lock_guard<std::mutex> lock(clientsMutex);
-            if (clients % 3 == 0){
+            if (clients % 3 == 0) {
                 game = std::make_shared<Game>();
                 std::cout << "A new game has been created." << std::endl;
             }
